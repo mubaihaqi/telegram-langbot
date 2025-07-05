@@ -186,6 +186,132 @@ Ketik jawaban Anda (a, b, c, atau d).
         "Terjadi kesalahan tak terduga saat memulai latihan."
       );
     }
+  } else {
+    // Jika bukan perintah yang dikenal, asumsikan ini adalah jawaban
+    try {
+      // 1. Ambil state user (terutama current_question_id)
+      const { data: user, error: userFetchError } = await supabase
+        .from("users")
+        .select("*")
+        .eq("telegram_id", chatId)
+        .single();
+
+      if (userFetchError || !user) {
+        console.error(
+          "Error fetching user for answer evaluation:",
+          userFetchError
+        );
+        await sendMessage(
+          chatId,
+          "Maaf, saya tidak dapat menemukan sesi latihan Anda. Silakan mulai ulang dengan /latihan."
+        );
+        return res.status(200).send("OK");
+      }
+
+      if (!user.current_question_id) {
+        // User tidak sedang dalam sesi latihan aktif, abaikan atau beri info
+        await sendMessage(
+          chatId,
+          "Saya tidak mengerti perintah Anda. Silakan ketik /help untuk melihat daftar perintah, atau /latihan untuk mulai belajar!"
+        );
+        return res.status(200).send("OK");
+      }
+
+      // 2. Ambil detail soal yang sedang dijawab
+      const { data: question, error: questionFetchError } = await supabase
+        .from("questions")
+        .select("*")
+        .eq("id", user.current_question_id)
+        .single();
+
+      if (questionFetchError || !question) {
+        console.error(
+          "Error fetching question for evaluation:",
+          questionFetchError
+        );
+        await sendMessage(
+          chatId,
+          "Maaf, soal yang sedang Anda jawab tidak ditemukan. Silakan mulai latihan baru dengan /latihan."
+        );
+        // Reset current_question_id jika soal tidak ditemukan
+        await supabase
+          .from("users")
+          .update({ current_question_id: null })
+          .eq("telegram_id", chatId);
+        return res.status(200).send("OK");
+      }
+
+      // 3. Evaluasi Jawaban
+      const userAnswer = text.toLowerCase().trim(); // Jadikan lowercase untuk perbandingan
+      const correctAnswerIndex = question.answer_idx;
+      const isCorrect =
+        userAnswer === String.fromCharCode(97 + correctAnswerIndex);
+
+      let feedbackMessage = "";
+      let newXp = user.xp;
+      let newCorrectCount = user.correct_count;
+      let newWrongCount = user.wrong_count;
+
+      if (isCorrect) {
+        newXp += 10; // Tambah XP
+        newCorrectCount += 1;
+        feedbackMessage = `🎉 Benar sekali! Jawaban Anda tepat. Anda mendapatkan <b>10 XP</b>.\n\n${
+          question.explanation ? "Penjelasan: " + question.explanation : ""
+        }`;
+      } else {
+        newWrongCount += 1;
+        // Dapatkan huruf jawaban yang benar untuk feedback
+        const correctOptionLetter = String.fromCharCode(
+          97 + correctAnswerIndex
+        );
+        const correctOptionText = question.options[correctAnswerIndex];
+
+        feedbackMessage = `😔 Salah. Jawaban yang benar adalah <b>${correctOptionLetter}. ${correctOptionText}</b>.\n\n${
+          question.explanation
+            ? "Penjelasan: " + question.explanation
+            : "Tidak ada penjelasan tambahan."
+        }`;
+      }
+
+      // Hitung level baru
+      const newLevel = Math.floor(newXp / 100) + 1; // Rumus level: floor(XP / 100) + 1
+
+      // 4. Update data user di database
+      const { error: updateStatsError } = await supabase
+        .from("users")
+        .update({
+          xp: newXp,
+          level: newLevel,
+          correct_count: newCorrectCount,
+          wrong_count: newWrongCount,
+          current_question_id: null, // Reset state setelah menjawab
+        })
+        .eq("telegram_id", chatId);
+
+      if (updateStatsError) {
+        console.error("Error updating user stats:", updateStatsError);
+        await sendMessage(
+          chatId,
+          "Terjadi masalah saat menyimpan progres Anda."
+        );
+        return res.status(200).send("OK");
+      }
+
+      // 5. Kirim feedback ke user
+      await sendMessage(chatId, feedbackMessage);
+
+      // Opsional: Langsung tawarkan latihan lagi
+      await sendMessage(
+        chatId,
+        "\nKetik /latihan untuk soal berikutnya, atau /help untuk melihat perintah."
+      );
+    } catch (error) {
+      console.error("Unhandled error in answer evaluation:", error);
+      await sendMessage(
+        chatId,
+        "Terjadi kesalahan tak terduga saat mengevaluasi jawaban Anda."
+      );
+    }
   }
 
   return res.status(200).send("OK");
