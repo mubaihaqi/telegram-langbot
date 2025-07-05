@@ -66,7 +66,7 @@ export default async function handler(req, res) {
         console.error("Error checking user:", fetchError);
         await sendMessage(
           chatId,
-          "Terjadi kesalahan internal saat memeriksa data Anda."
+          "Terjadi kesalahan internal saat memeriksa data kamu."
         );
         return res.status(200).send("OK");
       }
@@ -83,7 +83,7 @@ export default async function handler(req, res) {
           console.error("Error saving new user:", insertError);
           await sendMessage(
             chatId,
-            "Gagal menyimpan data Anda. Silakan coba lagi nanti."
+            "Gagal menyimpan data kamu. Silakan coba lagi nanti."
           );
           return res.status(200).send("OK");
         }
@@ -107,6 +107,20 @@ export default async function handler(req, res) {
     }
   }
   // TODO: Tambahkan handler untuk perintah lain di sini (/latihan, /tema, /daily, /status, /help)
+  else if (text === "/help") {
+    const helpMessage = `
+      Halo! Saya adalah bot latihan bahasa Inggris kamu. Berikut adalah perintah yang bisa kamu gunakan:
+
+    📖 /latihan - Mulai latihan soal acak.
+    🎯 /tema [nama_tema] - Latihan soal berdasarkan tema tertentu (contoh: /tema makanan, /tema travel, /tema dasar).
+    📅 /daily - Ikuti tantangan harian (5 soal berurutan).
+    📊 /status - Cek progres, XP, dan level kamu.
+    ❓ /help - Menampilkan daftar perintah ini.
+
+    Semoga berhasil!
+    `.trim();
+    await sendMessage(chatId, helpMessage);
+  }
 
   return res.status(200).send("OK");
 }
