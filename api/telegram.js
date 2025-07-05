@@ -52,7 +52,7 @@ export default async function handler(req, res) {
     } (${chatId}): "${text}"`
   );
 
-  // Tangani perintah /start
+  // /start
   if (text === "/start") {
     try {
       // Cek apakah user sudah ada di database
@@ -106,20 +106,86 @@ export default async function handler(req, res) {
       await sendMessage(chatId, "Terjadi kesalahan tak terduga.");
     }
   }
-  // TODO: Tambahkan handler untuk perintah lain di sini (/latihan, /tema, /daily, /status, /help)
+  // /help
   else if (text === "/help") {
     const helpMessage = `
-      Halo! Saya adalah bot latihan bahasa Inggris kamu. Berikut adalah perintah yang bisa kamu gunakan:
+Halo! Saya adalah bot latihan bahasa Inggris kamu. Berikut adalah perintah yang bisa kamu gunakan:
 
-    📖 /latihan - Mulai latihan soal acak.
-    🎯 /tema [nama_tema] - Latihan soal berdasarkan tema tertentu (contoh: /tema makanan, /tema travel, /tema dasar).
-    📅 /daily - Ikuti tantangan harian (5 soal berurutan).
-    📊 /status - Cek progres, XP, dan level kamu.
-    ❓ /help - Menampilkan daftar perintah ini.
+📖 /latihan - Mulai latihan soal acak.
+🎯 /tema [nama_tema] - Latihan soal berdasarkan tema tertentu (contoh: /tema makanan, /tema travel, /tema dasar).
+📅 /daily - Ikuti tantangan harian (5 soal berurutan).
+📊 /status - Cek progres, XP, dan level kamu.
+❓ /help - Menampilkan daftar perintah ini.
 
-    Semoga berhasil!
+Semoga berhasil!
     `.trim();
     await sendMessage(chatId, helpMessage);
+  }
+
+  // /latihan
+  else if (text === "/latihan") {
+    try {
+      const { data: questions, error } = await supabase
+        .from("questions")
+        .select("*")
+        .order("id", { ascending: false, nullsFirst: false })
+        .limit(1);
+
+      if (error) {
+        console.error("Error fetching question:", error);
+        await sendMessage(
+          chatId,
+          "Maaf, terjadi masalah saat mengambil soal latihan. Silakan coba lagi nanti."
+        );
+        return res.status(200).send("OK");
+      }
+
+      if (!questions || questions.length === 0) {
+        await sendMessage(
+          chatId,
+          "Maaf, belum ada soal tersedia untuk latihan saat ini."
+        );
+        return res.status(200).send("OK");
+      }
+
+      const question = questions[0];
+
+      const { error: updateError } = await supabase
+        .from("users")
+        .update({ current_question_id: question.id })
+        .eq("telegram_id", chatId);
+
+      if (updateError) {
+        console.error("Error saving user state for question:", updateError);
+        await sendMessage(
+          chatId,
+          "Terjadi masalah saat menyiapkan soal. Silakan coba lagi."
+        );
+        return res.status(200).send("OK");
+      }
+
+      const optionsText = question.options
+        .map((opt, idx) => {
+          return `${String.fromCharCode(97 + idx)}. ${opt}`;
+        })
+        .join("\n");
+
+      const questionMessage = `Pertanyaan:
+${question.question}
+
+Pilihan Jawaban:
+${optionsText}
+
+Ketik jawaban Anda (a, b, c, atau d).
+`.trim();
+      await sendMessage(chatId, questionMessage);
+    } catch (error) {
+      console.error("Unhandled error in /latihan:", error);
+      await sendMessage(
+        chatId,
+        "Terjadi kesalahan tak terduga saat memulai latihan."
+      );
+    }
   }
 
   return res.status(200).send("OK");
