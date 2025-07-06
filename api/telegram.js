@@ -206,6 +206,111 @@ Ketik jawaban Anda (a, b, c, atau d).
         "Terjadi kesalahan tak terduga saat memulai latihan."
       );
     }
+  }
+
+  // /tema [nama_tema]
+  else if (text.startsWith("/tema ")) {
+    const theme = text.substring(6).trim().toLowerCase(); // Ambil nama tema dari pesan
+    if (!theme) {
+      await sendMessage(
+        chatId,
+        "Gunakan format: /tema [nama_tema]. Contoh: /tema makanan atau /tema travel"
+      );
+      return res.status(200).send("OK");
+    }
+
+    try {
+      // 1. Ambil semua ID soal dari tema tertentu
+      const { data: themedQuestionIds, error: idError } = await supabase
+        .from("questions")
+        .select("id")
+        .eq("theme", theme); // Filter berdasarkan tema
+
+      if (idError) {
+        console.error(
+          `Error fetching themed question IDs for ${theme}:`,
+          idError
+        );
+        await sendMessage(
+          chatId,
+          `Maaf, terjadi masalah saat mengambil soal tema "${theme}". Silakan coba lagi nanti.`
+        );
+        return res.status(200).send("OK");
+      }
+
+      if (!themedQuestionIds || themedQuestionIds.length === 0) {
+        await sendMessage(
+          chatId,
+          `Maaf, belum ada soal tersedia untuk tema "<b>${theme}</b>". Coba tema lain seperti 'makanan', 'travel', atau 'dasar'.`
+        );
+        return res.status(200).send("OK");
+      }
+
+      // Pilih satu ID secara acak dari daftar yang bertema
+      const randomIndex = Math.floor(Math.random() * themedQuestionIds.length);
+      const randomQuestionId = themedQuestionIds[randomIndex].id;
+
+      // Ambil detail soal berdasarkan ID acak tersebut
+      const { data: question, error: questionError } = await supabase
+        .from("questions")
+        .select("*")
+        .eq("id", randomQuestionId)
+        .single();
+
+      if (questionError || !question) {
+        console.error(
+          `Error fetching specific themed question for ${theme}:`,
+          questionError
+        );
+        await sendMessage(
+          chatId,
+          `Maaf, terjadi masalah saat mengambil soal tema "${theme}". Silakan coba lagi nanti.`
+        );
+        return res.status(200).send("OK");
+      }
+
+      // Simpan state user (soal yang sedang dijawab)
+      const { error: updateError } = await supabase
+        .from("users")
+        .update({ current_question_id: question.id })
+        .eq("telegram_id", chatId);
+
+      if (updateError) {
+        console.error(
+          "Error saving user state for themed question:",
+          updateError
+        );
+        await sendMessage(
+          chatId,
+          "Terjadi masalah saat menyiapkan soal tema. Silakan coba lagi."
+        );
+        return res.status(200).send("OK");
+      }
+
+      // Kirim pertanyaan dan pilihan jawaban
+      const optionsText = question.options
+        .map((opt, idx) => {
+          return `${String.fromCharCode(97 + idx)}. ${opt}`;
+        })
+        .join("\n");
+
+      const questionMessage = `
+Pertanyaan tema ${theme}:
+${question.question}
+
+Pilihan Jawaban:
+${optionsText}
+
+Ketik jawaban Anda (a, b, c, atau d).
+`.trim();
+      await sendMessage(chatId, questionMessage);
+    } catch (error) {
+      console.error("Unhandled error in /tema:", error);
+      await sendMessage(
+        chatId,
+        "Terjadi kesalahan tak terduga saat memulai latihan tema."
+      );
+    }
   } else {
     // Jika bukan perintah yang dikenal, asumsikan ini adalah jawaban
     try {
