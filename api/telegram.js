@@ -125,22 +125,21 @@ Semoga berhasil!
   // /latihan
   else if (text === "/latihan") {
     try {
-      const { data: questions, error } = await supabase
+      // Ambil semua ID soal yang tersedia
+      const { data: allQuestionIds, error: idError } = await supabase
         .from("questions")
-        .select("*")
-        .order("id", { ascending: false, nullsFirst: false })
-        .limit(1);
+        .select("id"); // Hanya ambil kolom ID
 
-      if (error) {
-        console.error("Error fetching question:", error);
+      if (idError) {
+        console.error("Error fetching question IDs:", idError);
         await sendMessage(
           chatId,
-          "Maaf, terjadi masalah saat mengambil soal latihan. Silakan coba lagi nanti."
+          "Maaf, terjadi masalah saat mengambil daftar soal. Silakan coba lagi nanti."
         );
         return res.status(200).send("OK");
       }
 
-      if (!questions || questions.length === 0) {
+      if (!allQuestionIds || allQuestionIds.length === 0) {
         await sendMessage(
           chatId,
           "Maaf, belum ada soal tersedia untuk latihan saat ini."
@@ -148,7 +147,28 @@ Semoga berhasil!
         return res.status(200).send("OK");
       }
 
-      const question = questions[0];
+      // Pilih satu ID secara acak dari daftar yang ada
+      const randomIndex = Math.floor(Math.random() * allQuestionIds.length);
+      const randomQuestionId = allQuestionIds[randomIndex].id;
+
+      // Ambil detail soal berdasarkan ID acak tersebut
+      const { data: question, error: questionError } = await supabase
+        .from("questions")
+        .select("*")
+        .eq("id", randomQuestionId)
+        .single(); // Gunakan single() karena kita hanya butuh 1 soal
+
+      if (questionError || !question) {
+        console.error(
+          "Error fetching specific random question:",
+          questionError
+        );
+        await sendMessage(
+          chatId,
+          "Maaf, terjadi masalah saat mengambil soal latihan. Silakan coba lagi nanti."
+        );
+        return res.status(200).send("OK");
+      }
 
       const { error: updateError } = await supabase
         .from("users")
@@ -284,7 +304,7 @@ Ketik jawaban Anda (a, b, c, atau d).
           level: newLevel,
           correct_count: newCorrectCount,
           wrong_count: newWrongCount,
-          current_question_id: null, // Reset state setelah menjawab
+          current_question_id: null,
         })
         .eq("telegram_id", chatId);
 
