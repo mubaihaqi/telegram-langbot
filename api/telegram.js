@@ -311,8 +311,159 @@ Ketik jawaban Anda (a, b, c, atau d).
         "Terjadi kesalahan tak terduga saat memulai latihan tema."
       );
     }
-  } else {
-    // Jika bukan perintah yang dikenal, asumsikan ini adalah jawaban
+  }
+
+  // /daily
+  else if (text === "/daily") {
+    try {
+      // 1. Ambil data user
+      const { data: user, error: userFetchError } = await supabase
+        .from("users")
+        .select("*")
+        .eq("telegram_id", chatId)
+        .single();
+
+      if (userFetchError || !user) {
+        console.error("Error fetching user for daily:", userFetchError);
+        await sendMessage(
+          chatId,
+          "Maaf, terjadi kesalahan saat mengambil data Anda. Silakan coba lagi nanti."
+        );
+        return res.status(200).send("OK");
+      }
+
+      // Dapatkan tanggal hari ini (UTC untuk konsistensi)
+      const today = new Date().toISOString().split("T")[0]; // Format YYYY-MM-DD
+      const lastDailyDate = user.last_daily;
+
+      if (lastDailyDate === today) {
+        // User sudah ikut tantangan harian hari ini
+        await sendMessage(
+          chatId,
+          "Anda sudah mengikuti tantangan harian hari ini. Silakan kembali besok untuk tantangan baru!"
+        );
+        return res.status(200).send("OK");
+      }
+
+      // 2. Jika belum ikut, ambil 5 soal acak
+      // Seperti sebelumnya, kita akan ambil semua ID, lalu pilih 5 secara acak
+      const { data: allQuestionIds, error: idError } = await supabase
+        .from("questions")
+        .select("id");
+
+      if (idError) {
+        console.error("Error fetching question IDs for daily:", idError);
+        await sendMessage(
+          chatId,
+          "Maaf, terjadi masalah saat menyiapkan tantangan harian. Silakan coba lagi nanti."
+        );
+        return res.status(200).send("OK");
+      }
+
+      if (!allQuestionIds || allQuestionIds.length < 5) {
+        await sendMessage(
+          chatId,
+          "Maaf, belum ada cukup soal tersedia untuk tantangan harian (minimal 5 soal diperlukan)."
+        );
+        return res.status(200).send("OK");
+      }
+
+      // Pilih 5 ID unik secara acak
+      const selectedQuestionIds = [];
+      const availableIndices = Array.from(
+        { length: allQuestionIds.length },
+        (_, i) => i
+      ); // [0, 1, 2, ..., n-1]
+
+      for (let i = 0; i < 5; i++) {
+        if (availableIndices.length === 0) break; // Jika soal tidak cukup, hentikan
+        const randomIndex = Math.floor(Math.random() * availableIndices.length);
+        const questionIndex = availableIndices.splice(randomIndex, 1)[0]; // Ambil dan hapus dari array
+        selectedQuestionIds.push(allQuestionIds[questionIndex].id);
+      }
+
+      if (selectedQuestionIds.length < 5) {
+        await sendMessage(
+          chatId,
+          "Maaf, tidak dapat memilih 5 soal unik. Silakan coba lagi nanti."
+        );
+        return res.status(200).send("OK");
+      }
+
+      // 3. Simpan state sesi daily ke user
+      const { error: updateDailyStateError } = await supabase
+        .from("users")
+        .update({
+          daily_question_ids: selectedQuestionIds, // Simpan array ID soal
+          daily_current_index: 0, // Mulai dari soal pertama (indeks 0)
+          // last_daily: tidak diupdate di sini, hanya setelah sesi selesai/di hari berikutnya
+        })
+        .eq("telegram_id", chatId);
+
+      if (updateDailyStateError) {
+        console.error(
+          "Error updating daily state for user:",
+          updateDailyStateError
+        );
+        await sendMessage(
+          chatId,
+          "Terjadi masalah saat memulai tantangan harian. Silakan coba lagi."
+        );
+        return res.status(200).send("OK");
+      }
+
+      // 4. Ambil soal pertama dari sesi daily dan kirimkan
+      const firstQuestionId = selectedQuestionIds[0];
+      const { data: firstQuestion, error: firstQuestionError } = await supabase
+        .from("questions")
+        .select("*")
+        .eq("id", firstQuestionId)
+        .single();
+
+      if (firstQuestionError || !firstQuestion) {
+        console.error(
+          "Error fetching first daily question:",
+          firstQuestionError
+        );
+        await sendMessage(
+          chatId,
+          "Maaf, soal pertama tantangan harian tidak ditemukan. Silakan mulai ulang."
+        );
+        // Reset daily state jika ada masalah
+        await supabase
+          .from("users")
+          .update({ daily_question_ids: null, daily_current_index: null })
+          .eq("telegram_id", chatId);
+        return res.status(200).send("OK");
+      }
+
+      const optionsText = firstQuestion.options
+        .map((opt, idx) => {
+          return `${String.fromCharCode(97 + idx)}. ${opt}`;
+        })
+        .join("\n");
+
+      const dailyQuestionMessage = `
+Tantangan Harian (${user.daily_current_index + 1}/5):
+${firstQuestion.question}
+
+Pilihan Jawaban:
+${optionsText}
+
+Ketik jawaban Anda (a, b, c, atau d).
+`.trim();
+      await sendMessage(chatId, dailyQuestionMessage);
+    } catch (error) {
+      console.error("Unhandled error in /daily start:", error);
+      await sendMessage(
+        chatId,
+        "Terjadi kesalahan tak terduga saat memulai tantangan harian."
+      );
+    }
+  }
+
+  // Jika bukan perintah yang dikenal, asumsikan ini adalah jawaban
+  else {
     try {
       // 1. Ambil state user (terutama current_question_id)
       const { data: user, error: userFetchError } = await supabase
