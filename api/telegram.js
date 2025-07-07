@@ -462,6 +462,47 @@ Ketik jawaban kamu (a, b, c, atau d).
     }
   }
 
+  // /status
+  else if (text === "/status") {
+    try {
+      // 1. Ambil data user
+      const { data: user, error: userFetchError } = await supabase
+        .from("users")
+        .select("xp, level, correct_count, wrong_count")
+        .eq("telegram_id", chatId)
+        .single();
+
+      if (userFetchError || !user) {
+        console.error("Error fetching user for status:", userFetchError);
+        await sendMessage(
+          chatId,
+          "Maaf, terjadi kesalahan saat mengambil data status kamu. Silakan coba lagi nanti."
+        );
+        return res.status(200).send("OK");
+      }
+      // 2. Hitung level berdasarkan XP
+      const currentLevel = Math.floor(user.xp / 100) + 1; // Rumus: floor(XP / 100) + 1
+
+      const statusMessage = `
+📊 Status Progres kamu:
+
+⭐ XP: ${user.xp}
+✨ Level: ${currentLevel}
+✅ Jawaban Benar: ${user.correct_count}
+❌ Jawaban Salah: ${user.wrong_count}
+
+Terus semangat belajar ya!
+`.trim();
+      await sendMessage(chatId, statusMessage);
+    } catch (error) {
+      console.error("Unhandled error in /status:", error);
+      await sendMessage(
+        chatId,
+        "Terjadi kesalahan tak terduga saat menampilkan status kamu."
+      );
+    }
+  }
+
   // Jika bukan perintah yang dikenal, asumsikan ini adalah jawaban
   else {
     try {
