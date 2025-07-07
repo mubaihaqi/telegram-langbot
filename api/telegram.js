@@ -196,7 +196,7 @@ ${question.question}
 Pilihan Jawaban:
 ${optionsText}
 
-Ketik jawaban Anda (a, b, c, atau d).
+Ketik jawaban kamu (a, b, c, atau d).
 `.trim();
       await sendMessage(chatId, questionMessage);
     } catch (error) {
@@ -301,7 +301,7 @@ ${question.question}
 Pilihan Jawaban:
 ${optionsText}
 
-Ketik jawaban Anda (a, b, c, atau d).
+Ketik jawaban kamu (a, b, c, atau d).
 `.trim();
       await sendMessage(chatId, questionMessage);
     } catch (error) {
@@ -327,7 +327,7 @@ Ketik jawaban Anda (a, b, c, atau d).
         console.error("Error fetching user for daily:", userFetchError);
         await sendMessage(
           chatId,
-          "Maaf, terjadi kesalahan saat mengambil data Anda. Silakan coba lagi nanti."
+          "Maaf, terjadi kesalahan saat mengambil data kamu. Silakan coba lagi nanti."
         );
         return res.status(200).send("OK");
       }
@@ -340,7 +340,7 @@ Ketik jawaban Anda (a, b, c, atau d).
         // User sudah ikut tantangan harian hari ini
         await sendMessage(
           chatId,
-          "Anda sudah mengikuti tantangan harian hari ini. Silakan kembali besok untuk tantangan baru!"
+          "kamu sudah mengikuti tantangan harian hari ini. Silakan kembali besok untuk tantangan baru!"
         );
         return res.status(200).send("OK");
       }
@@ -450,7 +450,7 @@ ${firstQuestion.question}
 Pilihan Jawaban:
 ${optionsText}
 
-Ketik jawaban Anda (a, b, c, atau d).
+Ketik jawaban kamu (a, b, c, atau d).
 `.trim();
       await sendMessage(chatId, dailyQuestionMessage);
     } catch (error) {
@@ -465,7 +465,7 @@ Ketik jawaban Anda (a, b, c, atau d).
   // Jika bukan perintah yang dikenal, asumsikan ini adalah jawaban
   else {
     try {
-      // 1. Ambil state user (terutama current_question_id)
+      // 1. Ambil data user
       const { data: user, error: userFetchError } = await supabase
         .from("users")
         .select("*")
@@ -474,118 +474,257 @@ Ketik jawaban Anda (a, b, c, atau d).
 
       if (userFetchError || !user) {
         console.error(
-          "Error fetching user for answer evaluation:",
+          "Error fetching user for answer processing:",
           userFetchError
         );
         await sendMessage(
           chatId,
-          "Maaf, saya tidak dapat menemukan sesi latihan Anda. Silakan mulai ulang dengan /latihan."
+          "Maaf, terjadi kesalahan saat mengambil data kamu. Silakan coba lagi nanti."
         );
         return res.status(200).send("OK");
       }
 
-      if (!user.current_question_id) {
-        // User tidak sedang dalam sesi latihan aktif, abaikan atau beri info
-        await sendMessage(
-          chatId,
-          "Saya tidak mengerti perintah Anda. Silakan ketik /help untuk melihat daftar perintah, atau /latihan untuk mulai belajar!"
-        );
-        return res.status(200).send("OK");
-      }
+      // Cek apakah user sedang dalam sesi Tantangan Harian
+      if (
+        user.daily_question_ids &&
+        user.daily_current_index !== null &&
+        user.daily_current_index < 5
+      ) {
+        // User sedang dalam sesi daily challenge
+        const currentQuestionId =
+          user.daily_question_ids[user.daily_current_index];
 
-      // 2. Ambil detail soal yang sedang dijawab
-      const { data: question, error: questionFetchError } = await supabase
-        .from("questions")
-        .select("*")
-        .eq("id", user.current_question_id)
-        .single();
+        const { data: question, error: questionError } = await supabase
+          .from("questions")
+          .select("*")
+          .eq("id", currentQuestionId)
+          .single();
 
-      if (questionFetchError || !question) {
-        console.error(
-          "Error fetching question for evaluation:",
-          questionFetchError
-        );
-        await sendMessage(
-          chatId,
-          "Maaf, soal yang sedang Anda jawab tidak ditemukan. Silakan mulai latihan baru dengan /latihan."
-        );
-        // Reset current_question_id jika soal tidak ditemukan
-        await supabase
+        if (questionError || !question) {
+          console.error(
+            "Error fetching daily question for answer:",
+            questionError
+          );
+          await sendMessage(
+            chatId,
+            "Maaf, soal tantangan harian tidak ditemukan. Sesi dibatalkan. Silakan mulai ulang /daily."
+          );
+          // Reset daily state jika ada masalah
+          await supabase
+            .from("users")
+            .update({ daily_question_ids: null, daily_current_index: null })
+            .eq("telegram_id", chatId);
+          return res.status(200).send("OK");
+        }
+
+        const userAnswer = text.toLowerCase().trim();
+        const correctAnswerChar = String.fromCharCode(97 + question.answer_idx);
+        let feedbackMessage = "";
+        let isCorrect = false;
+
+        // Cek apakah jawaban valid (a, b, c, d)
+        if (
+          ["a", "b", "c", "d"].includes(userAnswer) &&
+          question.options[userAnswer.charCodeAt(0) - 97]
+        ) {
+          if (userAnswer === correctAnswerChar) {
+            isCorrect = true;
+            feedbackMessage = `Benar sekali! Jawaban kamu tepat. kamu mendapatkan 10 XP.`;
+            user.xp += 10;
+            user.correct_count += 1;
+          } else {
+            feedbackMessage = `Salah. Jawaban yang benar adalah <b>${correctAnswerChar.toUpperCase()}</b>. ${
+              question.explanation
+            }`;
+            user.wrong_count += 1;
+          }
+
+          user.daily_current_index += 1; // Pindah ke soal berikutnya
+
+          // Update user state di database
+          const { error: updateError } = await supabase
+            .from("users")
+            .update({
+              xp: user.xp,
+              correct_count: user.correct_count,
+              wrong_count: user.wrong_count,
+              daily_current_index: user.daily_current_index,
+              // current_question_id tidak perlu direset di sini karena ini daily session
+            })
+            .eq("telegram_id", chatId);
+
+          if (updateError) {
+            console.error(
+              "Error updating user state for daily answer:",
+              updateError
+            );
+            await sendMessage(
+              chatId,
+              "Terjadi masalah saat menyimpan progres kamu. Silakan coba lagi."
+            );
+            return res.status(200).send("OK");
+          }
+
+          await sendMessage(chatId, feedbackMessage); // Kirim feedback jawaban
+
+          // Cek apakah sesi daily sudah selesai (5 soal)
+          if (user.daily_current_index < 5) {
+            // Kirim soal berikutnya
+            const nextQuestionId =
+              user.daily_question_ids[user.daily_current_index];
+            const { data: nextQuestion, error: nextQuestionError } =
+              await supabase
+                .from("questions")
+                .select("*")
+                .eq("id", nextQuestionId)
+                .single();
+
+            if (nextQuestionError || !nextQuestion) {
+              console.error(
+                "Error fetching next daily question:",
+                nextQuestionError
+              );
+              await sendMessage(
+                chatId,
+                "Maaf, soal berikutnya tidak ditemukan. Sesi daily dibatalkan."
+              );
+              // Reset daily state jika ada masalah
+              await supabase
+                .from("users")
+                .update({ daily_question_ids: null, daily_current_index: null })
+                .eq("telegram_id", chatId);
+              return res.status(200).send("OK");
+            }
+
+            const nextOptionsText = nextQuestion.options
+              .map((opt, idx) => {
+                return `${String.fromCharCode(97 + idx)}. ${opt}`;
+              })
+              .join("\n");
+
+            const nextDailyQuestionMessage = `
+Tantangan Harian (${user.daily_current_index + 1}/5):
+${nextQuestion.question}
+
+Pilihan Jawaban:
+${nextOptionsText}
+
+Ketik jawaban kamu (a, b, c, atau d).
+`.trim();
+            await sendMessage(chatId, nextDailyQuestionMessage);
+          } else {
+            // Sesi daily selesai
+            const finalXpGained = user.xp - (user.xp - (isCorrect ? 10 : 0));
+            const correctAnswersInSession =
+              user.daily_question_ids.length -
+              (user.wrong_count - (user.wrong_count - (isCorrect ? 0 : 1)));
+            await sendMessage(
+              chatId,
+              `
+Tantangan Harian selesai!
+kamu telah menyelesaikan 5 soal.
+Total XP kamu saat ini: ${user.xp}
+kamu bisa mengikuti tantangan harian lagi besok.
+`.trim()
+            );
+            // Reset daily state dan update last_daily
+            const { error: resetDailyStateError } = await supabase
+              .from("users")
+              .update({
+                daily_question_ids: null,
+                daily_current_index: null,
+                last_daily: new Date().toISOString().split("T")[0], // Update tanggal terakhir ikut daily
+              })
+              .eq("telegram_id", chatId);
+
+            if (resetDailyStateError) {
+              console.error(
+                "Error resetting daily state after session:",
+                resetDailyStateError
+              );
+            }
+          }
+        } else {
+          // Jawaban tidak valid (bukan a, b, c, d) dalam sesi daily
+          await sendMessage(
+            chatId,
+            "Jawaban tidak valid. Harap ketik a, b, c, atau d."
+          );
+        }
+      } else if (user.current_question_id) {
+        // User sedang dalam sesi latihan normal (/latihan atau /tema)
+        const { data: question, error: questionError } = await supabase
+          .from("questions")
+          .select("*")
+          .eq("id", user.current_question_id)
+          .single();
+
+        if (questionError || !question) {
+          console.error("Error fetching current question:", questionError);
+          await sendMessage(
+            chatId,
+            "Maaf, soal yang sedang kamu jawab tidak ditemukan. Silakan mulai latihan baru dengan /latihan atau /tema."
+          );
+          // Reset current_question_id jika soal tidak ditemukan
+          await supabase
+            .from("users")
+            .update({ current_question_id: null })
+            .eq("telegram_id", chatId);
+          return res.status(200).send("OK");
+        }
+
+        const userAnswer = text.toLowerCase().trim();
+        const correctAnswerChar = String.fromCharCode(97 + question.answer_idx);
+        let feedbackMessage = "";
+
+        if (userAnswer === correctAnswerChar) {
+          feedbackMessage = `Benar sekali! Jawaban kamu tepat. kamu mendapatkan 10 XP.`;
+          user.xp += 10;
+          user.correct_count += 1;
+        } else {
+          feedbackMessage = `Salah. Jawaban yang benar adalah <b>${correctAnswerChar.toUpperCase()}</b>. ${
+            question.explanation
+          }`;
+          user.wrong_count += 1;
+        }
+
+        // Update user state di database
+        const { error: updateError } = await supabase
           .from("users")
-          .update({ current_question_id: null })
+          .update({
+            xp: user.xp,
+            correct_count: user.correct_count,
+            wrong_count: user.wrong_count,
+            current_question_id: null, // Reset state setelah menjawab
+          })
           .eq("telegram_id", chatId);
-        return res.status(200).send("OK");
-      }
 
-      // 3. Evaluasi Jawaban
-      const userAnswer = text.toLowerCase().trim(); // Jadikan lowercase untuk perbandingan
-      const correctAnswerIndex = question.answer_idx;
-      const isCorrect =
-        userAnswer === String.fromCharCode(97 + correctAnswerIndex);
+        if (updateError) {
+          console.error("Error saving user state:", updateError);
+          await sendMessage(
+            chatId,
+            "Terjadi masalah saat menyimpan progres kamu. Silakan coba lagi."
+          );
+          return res.status(200).send("OK");
+        }
 
-      let feedbackMessage = "";
-      let newXp = user.xp;
-      let newCorrectCount = user.correct_count;
-      let newWrongCount = user.wrong_count;
-
-      if (isCorrect) {
-        newXp += 10; // Tambah XP
-        newCorrectCount += 1;
-        feedbackMessage = `🎉 Benar sekali! Jawaban Anda tepat. Anda mendapatkan <b>10 XP</b>.\n\n${
-          question.explanation ? "Penjelasan: " + question.explanation : ""
-        }`;
-      } else {
-        newWrongCount += 1;
-        // Dapatkan huruf jawaban yang benar untuk feedback
-        const correctOptionLetter = String.fromCharCode(
-          97 + correctAnswerIndex
-        );
-        const correctOptionText = question.options[correctAnswerIndex];
-
-        feedbackMessage = `😔 Salah. Jawaban yang benar adalah <b>${correctOptionLetter}. ${correctOptionText}</b>.\n\n${
-          question.explanation
-            ? "Penjelasan: " + question.explanation
-            : "Tidak ada penjelasan tambahan."
-        }`;
-      }
-
-      // Hitung level baru
-      const newLevel = Math.floor(newXp / 100) + 1; // Rumus level: floor(XP / 100) + 1
-
-      // 4. Update data user di database
-      const { error: updateStatsError } = await supabase
-        .from("users")
-        .update({
-          xp: newXp,
-          level: newLevel,
-          correct_count: newCorrectCount,
-          wrong_count: newWrongCount,
-          current_question_id: null,
-        })
-        .eq("telegram_id", chatId);
-
-      if (updateStatsError) {
-        console.error("Error updating user stats:", updateStatsError);
         await sendMessage(
           chatId,
-          "Terjadi masalah saat menyimpan progres Anda."
+          feedbackMessage +
+            `\n\nKetik /latihan untuk soal berikutnya, atau /help untuk melihat perintah.`
         );
-        return res.status(200).send("OK");
+      } else {
+        // Tidak ada sesi aktif, atau pesan tidak dikenal
+        await sendMessage(
+          chatId,
+          "Saya tidak mengerti perintah kamu. Silakan ketik /help untuk melihat daftar perintah, atau /latihan untuk mulai belajar!"
+        );
       }
-
-      // 5. Kirim feedback ke user
-      await sendMessage(chatId, feedbackMessage);
-
-      // Opsional: Langsung tawarkan latihan lagi
-      await sendMessage(
-        chatId,
-        "\nKetik /latihan untuk soal berikutnya, atau /help untuk melihat perintah."
-      );
     } catch (error) {
-      console.error("Unhandled error in answer evaluation:", error);
+      console.error("Unhandled error in answer processing:", error);
       await sendMessage(
         chatId,
-        "Terjadi kesalahan tak terduga saat mengevaluasi jawaban Anda."
+        "Terjadi kesalahan tak terduga saat memproses jawaban kamu."
       );
     }
   }
