@@ -503,6 +503,44 @@ Terus semangat belajar ya!
     }
   }
 
+  //  /about
+  else if (text === "/about") {
+    try {
+      const aboutMessage = `
+🤖 Tentang LangBot
+LangBot adalah bot latihan bahasa Inggris interaktif yang dirancang untuk membantu Anda meningkatkan kemampuan bahasa Inggris Anda dengan cara yang menyenangkan dan efektif.
+
+✨ Tech Stack:
+Bot ini dibangun menggunakan teknologi modern:
+
+Backend: Node.js (JavaScript)
+Framework: Vercel Serverless Functions
+Database: PostgreSQL (melalui Supabase)
+
+👨‍💻 Pengembang:
+Dibuat dengan ☕ oleh Muhammad Umar Baihaqi
+
+🔗 Terhubung dengan Saya:
+GitHub: https://github.com/mubaihaqi
+Instagram: https://instagram.com/haq_xgi
+
+✉️ Masukan & Saran:
+Ada ide atau menemukan bug? Kirimkan masukan Anda ke:
+Email: muhammadbaihaqidev@gmail.com
+Telegram: @Hjaeqss
+
+Terima kasih telah menggunakan LangBot!
+`.trim();
+      await sendMessage(chatId, aboutMessage);
+    } catch (error) {
+      console.error("Unhandled error in /about:", error);
+      await sendMessage(
+        chatId,
+        "Terjadi kesalahan tak terduga saat menampilkan informasi tentang bot."
+      );
+    }
+  }
+
   // Jika bukan perintah yang dikenal, asumsikan ini adalah jawaban
   else {
     try {
